@@ -10,13 +10,18 @@ use actix_http::{
     header::{HeaderValue, CONTENT_TYPE, SERVER},
     KeepAlive, StatusCode,
 };
-use actix_web::{App, HttpResponse, HttpServer, middleware::Logger, web::{self, Bytes}};
+use actix_web::{
+    middleware::Logger,
+    web::{self, Bytes},
+    App, HttpResponse, HttpServer,
+};
 use anyhow::{bail, Result};
 use futures::TryStreamExt;
-use mongodb::{options::ClientOptions, Client};
-use yarte::ywrite_html;
-use serde_json::json;
 use log::info;
+use mongodb::bson::RawDocumentBuf;
+use mongodb::{options::ClientOptions, Client};
+use serde_json::json;
+use yarte::ywrite_html;
 
 #[actix_web::get("/hello")]
 async fn hello(data: web::Data<Client>) -> HttpResponse {
@@ -26,13 +31,27 @@ async fn hello(data: web::Data<Client>) -> HttpResponse {
 #[actix_web::get("/fortunes")]
 async fn fortune(data: web::Data<Client>) -> HttpResponse {
     async fn fetch_fortunes(client: &Client) -> Result<Vec<Fortune>> {
-        let mut fortunes: Vec<Fortune> = client
+        let mut fortunes_cursor = client
             .database("hello_world")
-            .collection::<Fortune>("fortune")
+            .collection::<RawDocumentBuf>("fortune")
             .find(None, None)
-            .await?
-            .try_collect()
             .await?;
+        let mut fortunes = Vec::new();
+
+        // todo!()
+        // while let Some(doc) = fortunes_cursor.try_next().await? {
+        //     // let f = Fortune {
+        //     //     id: doc.get_f64("id")? as i32,
+        //     //     message: doc.get_str("message")?.to_string(),
+        //     // };
+        //     let mut iter = doc.into_iter();
+        //     while let Some(Ok((k, v))) = iter.next() {
+        //         match (k, v) {
+        //             ("id", RawBsonRef::Double(d)) =>  
+        //         }
+        //     }
+        //     fortunes.push(f);
+        // }
 
         fortunes.push(Fortune {
             id: 0,
@@ -60,14 +79,19 @@ async fn fortune(data: web::Data<Client>) -> HttpResponse {
             );
             res
         }
-        Err(e) => {
-            HttpResponse::InternalServerError().body(e.to_string()).into()
-        }
+        Err(e) => HttpResponse::InternalServerError()
+            .body(e.to_string())
+            .into(),
     }
 }
 
-#[actix_web::main]
-async fn main() -> Result<()> {
+fn main() {
+    actix_web::rt::System::with_tokio_rt(|| tokio::runtime::Runtime::new().unwrap())
+        .block_on(async_main())
+        .unwrap();
+}
+
+async fn async_main() -> Result<()> {
     println!("Starting http server: 0.0.0.0:8080");
     // std::env::set_var("RUST_LOG", "debug");
     // std::env::set_var("RUST_BACKTRACE", "1");
