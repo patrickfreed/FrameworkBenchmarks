@@ -21,22 +21,32 @@ use log::info;
 use mongodb::bson::RawDocumentBuf;
 use mongodb::{options::ClientOptions, Client};
 use serde_json::json;
+use tokio::runtime::Handle;
 use yarte::ywrite_html;
 
+struct Data {
+    client: Client,
+    tokio_runtime: tokio::runtime::Handle,
+}
+
 #[actix_web::get("/hello")]
-async fn hello(data: web::Data<Client>) -> HttpResponse {
+async fn hello(data: web::Data<Data>) -> HttpResponse {
     HttpResponse::Ok().json(json!({"ok": 1}))
 }
 
 #[actix_web::get("/fortunes")]
-async fn fortune(data: web::Data<Client>) -> HttpResponse {
+async fn fortune(data: web::Data<Data>) -> HttpResponse {
     async fn fetch_fortunes(client: &Client) -> Result<Vec<Fortune>> {
         let mut fortunes_cursor = client
             .database("hello_world")
-            .collection::<RawDocumentBuf>("fortune")
+            .collection::<Fortune>("fortune")
             .find(None, None)
             .await?;
         let mut fortunes = Vec::new();
+
+        while let Some(fortune) = fortunes_cursor.try_next().await? {
+            fortunes.push(fortune);
+        }
 
         // todo!()
         // while let Some(doc) = fortunes_cursor.try_next().await? {
@@ -63,7 +73,10 @@ async fn fortune(data: web::Data<Client>) -> HttpResponse {
         Ok(fortunes)
     }
 
-    let res = fetch_fortunes(&data).await;
+    let d = data.clone();
+    let res = data.tokio_runtime.spawn(async move {
+        fetch_fortunes(&d.client).await
+    }).await.unwrap();
 
     match res {
         Ok(fortunes) => {
@@ -97,6 +110,8 @@ async fn async_main() -> Result<()> {
     // std::env::set_var("RUST_BACKTRACE", "1");
     // env_logger::init();
 
+    let handle = Handle::current();
+
     let uri = std::env::var("ACTIX_TECHEMPOWER_MONGODB_URL")
         .or_else(|_| bail!("missing ACTIX_TECHEMPOWER_MONGODB_URL env variable"))?;
     let mut options = ClientOptions::parse(uri).await?;
@@ -107,7 +122,10 @@ async fn async_main() -> Result<()> {
     HttpServer::new(move || {
         App::new()
             // .wrap(Logger::default())
-            .app_data(web::Data::new(client.clone()))
+            .app_data(web::Data::new(Data {
+                client: client.clone(),
+                tokio_runtime: handle.clone()
+            }))
             .service(fortune)
     })
     .keep_alive(KeepAlive::Os)
