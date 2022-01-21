@@ -13,6 +13,10 @@ path = "src/main.rs"
 name = "actix-4-mongodb"
 path = "src/main_mongodb.rs"
 
+[[bin]]
+name = "actix-4-pg"
+path = "src/main_pg.rs"
+
 [dependencies]
 anyhow = "1"
 actix-http = { version = "3.0.0-beta.18", default-features = false }
@@ -28,3 +32,6 @@ env_logger = "0.8"
 log = "0.4"
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
+tokio-postgres = "0.7.5"
+deadpool-postgres = "0.10.1"
+rand = "0.8.4"

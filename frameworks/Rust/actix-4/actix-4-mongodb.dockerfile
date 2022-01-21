@@ -8,7 +8,7 @@ ADD ./ /actix-4
 WORKDIR /actix-4
 
 RUN cargo clean
-RUN RUSTFLAGS="-C target-cpu=native" cargo build --release
+RUN RUSTFLAGS="-C target-cpu=native" cargo build --release --bin actix-4-mongodb
 
 EXPOSE 8080
 
