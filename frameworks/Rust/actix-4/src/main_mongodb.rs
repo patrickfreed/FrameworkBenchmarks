@@ -1,9 +1,6 @@
 mod models;
-mod utils;
 
-use std::ops::Deref;
-
-use models::Fortune;
+use models::{Result, Fortune, World, Queries};
 
 use actix_http::{
     body::BoxBody,
@@ -11,16 +8,14 @@ use actix_http::{
     KeepAlive, StatusCode,
 };
 use actix_web::{
-    middleware::Logger,
     web::{self, Bytes},
     App, HttpResponse, HttpServer,
 };
-use anyhow::{bail, Result};
-use futures::TryStreamExt;
-use log::info;
-use mongodb::bson::RawDocumentBuf;
+use anyhow::bail;
+use futures::{stream::FuturesUnordered, TryStreamExt};
+use mongodb::bson::doc;
 use mongodb::{options::ClientOptions, Client};
-use serde_json::json;
+use rand::{prelude::SmallRng, Rng, SeedableRng};
 use tokio::runtime::Handle;
 use yarte::ywrite_html;
 
@@ -29,40 +24,125 @@ struct Data {
     tokio_runtime: tokio::runtime::Handle,
 }
 
-#[actix_web::get("/hello")]
-async fn hello(data: web::Data<Data>) -> HttpResponse {
-    HttpResponse::Ok().json(json!({"ok": 1}))
+async fn find_random_world(data: web::Data<Data>) -> Result<World> {
+    let runtime = data.tokio_runtime.clone();
+    runtime
+        .spawn(async move {
+            let mut rng = SmallRng::from_entropy();
+            let id = (rng.gen::<u32>() % 10_000 + 1) as i32;
+
+            let coll = data.client.database("hello_world").collection("world");
+            let world = coll
+                .find_one(doc! { "id": id as f32 }, None)
+                .await?
+                .expect("should find world");
+            Ok(world)
+        })
+        .await?
+}
+
+#[actix_web::get("/db")]
+async fn db(data: web::Data<Data>) -> Result<HttpResponse> {
+    let world = find_random_world(data).await?;
+    let mut bytes = Vec::with_capacity(48);
+    serde_json::to_writer(&mut bytes, &world)?;
+
+    let mut res = HttpResponse::with_body(StatusCode::OK, BoxBody::new(Bytes::from(bytes)));
+    res.headers_mut()
+        .insert(SERVER, HeaderValue::from_static("Actix"));
+    res.headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+
+    Ok(res)
+}
+
+async fn find_random_worlds(data: web::Data<Data>, num_of_worlds: usize) -> Result<Vec<World>> {
+    let mut futs = FuturesUnordered::new();
+    for _ in 0..num_of_worlds {
+        futs.push(find_random_world(data.clone()))
+    }
+
+    let mut worlds = Vec::with_capacity(num_of_worlds);
+    while let Some(world) = futs.try_next().await? {
+        worlds.push(world);
+    }
+
+    Ok(worlds)
+}
+
+#[actix_web::get("/queries")]
+async fn queries(data: web::Data<Data>, query: web::Query<Queries>) -> Result<HttpResponse> {
+    let n_queries = query.q;
+
+    let worlds = find_random_worlds(data, n_queries).await?;
+
+    let mut bytes = Vec::with_capacity(35 * n_queries);
+    serde_json::to_writer(&mut bytes, &worlds)?;
+
+    let mut res = HttpResponse::with_body(StatusCode::OK, BoxBody::new(Bytes::from(bytes)));
+    res.headers_mut()
+        .insert(SERVER, HeaderValue::from_static("Actix"));
+    res.headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+
+    Ok(res)
+}
+
+#[actix_web::get("/updates")]
+async fn updates(data: web::Data<Data>, query: web::Query<Queries>) -> Result<HttpResponse> {
+    let tokio_runtime = data.tokio_runtime.clone();
+    let client = data.client.clone();
+
+    let mut worlds = find_random_worlds(data, query.q).await?;
+
+    let mut rng = SmallRng::from_entropy();
+    let mut updates = Vec::new();
+    for world in worlds.iter_mut() {
+        let new_random_number = (rng.gen::<u32>() % 10_000 + 1) as i32;
+        updates.push(doc! {
+            "q": { "id": world.id }, "u": { "$set": { "randomNumber": new_random_number }}
+        });
+        world.random_number = new_random_number;
+    }
+
+    tokio_runtime
+        .spawn(async move {
+            client
+                .database("hello_world")
+                .run_command(
+                    doc! {
+                        "update": "world",
+                        "updates": updates,
+                        "ordered": false,
+                    },
+                    None,
+                )
+                .await
+        })
+        .await??;
+
+    let mut bytes = Vec::with_capacity(35 * worlds.len());
+    serde_json::to_writer(&mut bytes, &worlds)?;
+
+    let mut res = HttpResponse::with_body(StatusCode::OK, BoxBody::new(Bytes::from(bytes)));
+    res.headers_mut()
+        .insert(SERVER, HeaderValue::from_static("Actix"));
+    res.headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+
+    Ok(res)
 }
 
 #[actix_web::get("/fortunes")]
 async fn fortune(data: web::Data<Data>) -> HttpResponse {
     async fn fetch_fortunes(client: &Client) -> Result<Vec<Fortune>> {
-        let mut fortunes_cursor = client
+        let fortunes_cursor = client
             .database("hello_world")
             .collection::<Fortune>("fortune")
             .find(None, None)
             .await?;
-        let mut fortunes = Vec::new();
 
-        while let Some(fortune) = fortunes_cursor.try_next().await? {
-            fortunes.push(fortune);
-        }
-
-        // todo!()
-        // while let Some(doc) = fortunes_cursor.try_next().await? {
-        //     // let f = Fortune {
-        //     //     id: doc.get_f64("id")? as i32,
-        //     //     message: doc.get_str("message")?.to_string(),
-        //     // };
-        //     let mut iter = doc.into_iter();
-        //     while let Some(Ok((k, v))) = iter.next() {
-        //         match (k, v) {
-        //             ("id", RawBsonRef::Double(d)) =>  
-        //         }
-        //     }
-        //     fortunes.push(f);
-        // }
-
+        let mut fortunes: Vec<Fortune> = fortunes_cursor.try_collect().await?;
         fortunes.push(Fortune {
             id: 0,
             message: "Additional fortune added at request time.".to_string(),
@@ -74,9 +154,11 @@ async fn fortune(data: web::Data<Data>) -> HttpResponse {
     }
 
     let d = data.clone();
-    let res = data.tokio_runtime.spawn(async move {
-        fetch_fortunes(&d.client).await
-    }).await.unwrap();
+    let res = data
+        .tokio_runtime
+        .spawn(async move { fetch_fortunes(&d.client).await })
+        .await
+        .unwrap();
 
     match res {
         Ok(fortunes) => {
@@ -98,17 +180,9 @@ async fn fortune(data: web::Data<Data>) -> HttpResponse {
     }
 }
 
-fn main() {
-    actix_web::rt::System::with_tokio_rt(|| tokio::runtime::Runtime::new().unwrap())
-        .block_on(async_main())
-        .unwrap();
-}
-
-async fn async_main() -> Result<()> {
+#[actix_web::main]
+async fn main() -> Result<()> {
     println!("Starting http server: 0.0.0.0:8080");
-    // std::env::set_var("RUST_LOG", "debug");
-    // std::env::set_var("RUST_BACKTRACE", "1");
-    // env_logger::init();
 
     let handle = Handle::current();
 
@@ -121,12 +195,14 @@ async fn async_main() -> Result<()> {
 
     HttpServer::new(move || {
         App::new()
-            // .wrap(Logger::default())
             .app_data(web::Data::new(Data {
                 client: client.clone(),
-                tokio_runtime: handle.clone()
+                tokio_runtime: handle.clone(),
             }))
             .service(fortune)
+            .service(db)
+            .service(queries)
+            .service(updates)
     })
     .keep_alive(KeepAlive::Os)
     .client_timeout(0)
