@@ -1,19 +1,30 @@
-mod utils;
-mod models;
+use std::io;
 
 use actix_http::{body::BoxBody, KeepAlive};
 use actix_web::{
-    dev::{HttpServiceFactory, Server},
     http::{
         header::{HeaderValue, CONTENT_TYPE, SERVER},
         StatusCode,
     },
-    web::{self, Bytes, BytesMut},
+    web::{self, BufMut, Bytes, BytesMut},
     App, HttpResponse, HttpServer,
 };
 use anyhow::Result;
 use simd_json_derive::Serialize;
-use utils::{Writer, SIZE};
+
+pub const SIZE: usize = 27;
+
+pub struct Writer<'a>(pub &'a mut BytesMut);
+
+impl<'a> io::Write for Writer<'a> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0.put_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
 
 #[derive(Serialize)]
 pub struct Message {

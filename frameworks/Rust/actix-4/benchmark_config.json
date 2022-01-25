@@ -39,21 +39,25 @@
       "notes": "",
       "versus": ""
     },
-      "pg": {
-          "fortune_url": "/fortunes",
-          "port": 8080,
-          "approach": "Realistic",
-          "classification": "Micro",
-          "database": "Postgres",
-          "framework": "actix-4",
-          "language": "Rust",
-          "orm": "Raw",
-          "platform": "None",
-          "webserver": "actix-web",
-          "os": "Linux",
-          "database_os": "Linux",
-          "display_name": "Actix 4.0 [Postgres]",
-          "notes": "",
-          "versus": ""
-      }  }]
+    "pg": {
+      "db_url": "/db",
+      "fortune_url": "/fortunes",
+      "query_url": "/queries?q=",
+      "update_url": "/updates?q=",
+      "port": 8080,
+      "approach": "Realistic",
+      "classification": "Micro",
+      "database": "Postgres",
+      "framework": "actix-4",
+      "language": "Rust",
+      "orm": "Raw",
+      "platform": "None",
+      "webserver": "actix-web",
+      "os": "Linux",
+      "database_os": "Linux",
+      "display_name": "Actix 4.0 [Postgres]",
+      "notes": "",
+      "versus": ""
+    }
+  }]
 }
