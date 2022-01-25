@@ -6,8 +6,8 @@ ADD ./ /actix
 WORKDIR /actix
 
 RUN cargo clean
-RUN RUSTFLAGS="-C target-cpu=native" cargo build --release --bin actix-4-pg
+RUN RUSTFLAGS="-C target-cpu=native" cargo build --release --bin actix-4-pg-deadpool
 
 EXPOSE 8080
 
-CMD ./target/release/actix-4-pg
+CMD ./target/release/actix-4-pg-deadpool
