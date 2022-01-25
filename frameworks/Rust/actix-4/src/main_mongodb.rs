@@ -1,6 +1,6 @@
 mod models;
 
-use models::{Result, Fortune, World, Queries};
+use models::{Fortune, Queries, Result, World};
 
 use actix_http::{
     body::BoxBody,
@@ -174,16 +174,20 @@ async fn fortune(data: web::Data<Data>) -> HttpResponse {
             );
             res
         }
-        Err(e) => HttpResponse::InternalServerError()
-            .body(e.to_string())
-            .into(),
+        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
     }
 }
 
-#[actix_web::main]
-async fn main() -> Result<()> {
+fn main() {
+    actix_web::rt::System::with_tokio_rt(|| tokio::runtime::Runtime::new().unwrap())
+        .block_on(async_main())
+        .unwrap();
+}
+
+async fn async_main() -> Result<()> {
     println!("Starting http server: 0.0.0.0:8080");
 
+    // use a separate, multithreaded tokio runtime for db queries for better performance
     let handle = Handle::current();
 
     let uri = std::env::var("ACTIX_TECHEMPOWER_MONGODB_URL")

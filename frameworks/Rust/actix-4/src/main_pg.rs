@@ -1,24 +1,22 @@
 mod models;
-mod utils;
 
-use std::borrow::Borrow;
+use std::fmt::Write;
 
 use actix_http::{body::BoxBody, KeepAlive};
 use actix_web::{
-    dev::{HttpServiceFactory, Server},
     http::{
         header::{HeaderValue, CONTENT_TYPE, SERVER},
         StatusCode,
     },
-    web::{self, Bytes, BytesMut},
+    web::{self, Bytes},
     App, HttpResponse, HttpServer,
 };
-use anyhow::{bail, Result};
 use deadpool_postgres::{Config, Pool, PoolConfig, Runtime};
-use futures::{FutureExt, StreamExt};
+use futures::{stream::FuturesUnordered, StreamExt, TryStreamExt};
+use models::{Queries, Result, World};
+use rand::{prelude::SmallRng, Rng, SeedableRng};
 use simd_json_derive::Serialize;
-use tokio_postgres::NoTls;
-use utils::{Writer, SIZE};
+use tokio_postgres::{types::ToSql, NoTls};
 use yarte::ywrite_html;
 
 use crate::models::Fortune;
@@ -28,31 +26,118 @@ pub struct Message {
     pub message: &'static str,
 }
 
-async fn json() -> HttpResponse {
-    let message = Message {
-        message: "Hello, World!",
-    };
-    let mut body = BytesMut::with_capacity(SIZE);
-    message.json_write(&mut Writer(&mut body)).unwrap();
+async fn find_random_world(pool: &Pool) -> Result<World> {
+    let conn = pool.get().await?;
+    let world = conn
+        .prepare("SELECT * FROM world WHERE id=$1")
+        .await
+        .unwrap();
 
-    let mut res = HttpResponse::with_body(StatusCode::OK, BoxBody::new(body.freeze()));
-    res.headers_mut()
-        .insert(SERVER, HeaderValue::from_static("A"));
-    res.headers_mut()
-        .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-    res
+    let mut rng = SmallRng::from_entropy();
+    let id = (rng.gen::<u32>() % 10_000 + 1) as i32;
+
+    let row = conn.query_one(&world, &[&id]).await?;
+
+    Ok(World {
+        id: row.get(0),
+        random_number: row.get(1),
+    })
 }
 
-async fn plaintext() -> HttpResponse {
-    let mut res = HttpResponse::with_body(
-        StatusCode::OK,
-        BoxBody::new(Bytes::from_static(b"Hello, World!")),
-    );
+async fn find_random_worlds(pool: &Pool, num_of_worlds: usize) -> Result<Vec<World>> {
+    let mut futs = FuturesUnordered::new();
+    for _ in 0..num_of_worlds {
+        futs.push(find_random_world(pool));
+    }
+
+    let mut worlds = Vec::with_capacity(num_of_worlds);
+    while let Some(world) = futs.try_next().await? {
+        worlds.push(world);
+    }
+
+    Ok(worlds)
+}
+
+#[actix_web::get("/db")]
+async fn db(data: web::Data<Pool>) -> Result<HttpResponse> {
+    let world = find_random_world(&data).await?;
+    let mut bytes = Vec::with_capacity(48);
+    serde_json::to_writer(&mut bytes, &world)?;
+
+    let mut res = HttpResponse::with_body(StatusCode::OK, BoxBody::new(Bytes::from(bytes)));
     res.headers_mut()
-        .insert(SERVER, HeaderValue::from_static("A"));
+        .insert(SERVER, HeaderValue::from_static("Actix"));
     res.headers_mut()
-        .insert(CONTENT_TYPE, HeaderValue::from_static("text/plain"));
-    res
+        .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+
+    Ok(res)
+}
+
+#[actix_web::get("/queries")]
+async fn queries(data: web::Data<Pool>, query: web::Query<Queries>) -> Result<HttpResponse> {
+    let n_queries = query.q;
+
+    let worlds = find_random_worlds(&data, n_queries).await?;
+
+    let mut bytes = Vec::with_capacity(35 * n_queries);
+    serde_json::to_writer(&mut bytes, &worlds)?;
+
+    let mut res = HttpResponse::with_body(StatusCode::OK, BoxBody::new(Bytes::from(bytes)));
+    res.headers_mut()
+        .insert(SERVER, HeaderValue::from_static("Actix"));
+    res.headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+
+    Ok(res)
+}
+
+#[actix_web::get("/updates")]
+async fn updates(data: web::Data<Pool>, query: web::Query<Queries>) -> Result<HttpResponse> {
+    let mut worlds = find_random_worlds(&data, query.q).await?;
+
+    let mut rng = SmallRng::from_entropy();
+
+    let mut updates = "UPDATE world SET randomnumber = CASE id ".to_string();
+    let mut params: Vec<&(dyn ToSql + Sync)> = Vec::with_capacity(query.q as usize * 3);
+
+    let mut n_params = 1;
+    for world in worlds.iter_mut() {
+        let new_random_number = (rng.gen::<u32>() % 10_000 + 1) as i32;
+        write!(&mut updates, "when ${} then ${} ", n_params, n_params + 1).unwrap();
+        world.random_number = new_random_number;
+        n_params += 2;
+    }
+
+    // need separate loop to borrow immutably
+    for world in worlds.iter() {
+        params.push(&world.id);
+        params.push(&world.random_number);
+    }
+
+    updates.push_str("ELSE randomnumber END WHERE id IN (");
+    for world in worlds.iter() {
+        write!(&mut updates, "${},", n_params).unwrap();
+        params.push(&world.id);
+        n_params += 1;
+    }
+
+    updates.pop(); // drop trailing comma
+    updates.push(')');
+
+    let conn = data.get().await?;
+    let stmt = conn.prepare(&updates).await?;
+    conn.query(&stmt, &params).await?;
+
+    let mut bytes = Vec::with_capacity(35 * worlds.len());
+    serde_json::to_writer(&mut bytes, &worlds)?;
+
+    let mut res = HttpResponse::with_body(StatusCode::OK, BoxBody::new(Bytes::from(bytes)));
+    res.headers_mut()
+        .insert(SERVER, HeaderValue::from_static("Actix"));
+    res.headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+
+    Ok(res)
 }
 
 #[actix_web::get("/fortunes")]
@@ -100,23 +185,14 @@ async fn fortune(data: web::Data<Pool>) -> HttpResponse {
             );
             res
         }
-        Err(e) => HttpResponse::InternalServerError()
-            .body(e.to_string())
-            .into(),
+        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
     }
 }
 
 #[actix_web::main]
 async fn main() -> Result<()> {
     println!("Starting http server: 0.0.0.0:8080");
-    // std::env::set_var("RUST_LOG", "debug");
-    // std::env::set_var("RUST_BACKTRACE", "1");
-    // env_logger::init();
 
-    // let uri = std::env::var("ACTIX_TECHEMPOWER_MONGODB_URL")
-    //     .or_else(|_| bail!("missing ACTIX_TECHEMPOWER_MONGODB_URL env variable"))?;
-
-    // postgres://benchmarkdbuser:benchmarkdbpass@tfb-database/hello_world
     let mut cfg = Config::new();
     cfg.host = Some("tfb-database".to_string());
     cfg.dbname = Some("hello_world".to_string());
@@ -130,6 +206,9 @@ async fn main() -> Result<()> {
         App::new()
             .app_data(web::Data::new(pool.clone()))
             .service(fortune)
+            .service(db)
+            .service(queries)
+            .service(updates)
     })
     .keep_alive(KeepAlive::Os)
     .client_timeout(0)
