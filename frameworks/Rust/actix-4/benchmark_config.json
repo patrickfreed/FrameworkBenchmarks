@@ -39,7 +39,7 @@
       "notes": "",
       "versus": ""
     },
-    "pg": {
+    "pg-deadpool": {
       "db_url": "/db",
       "fortune_url": "/fortunes",
       "query_url": "/queries?q=",
@@ -55,7 +55,7 @@
       "webserver": "actix-web",
       "os": "Linux",
       "database_os": "Linux",
-      "display_name": "Actix 4.0 [Postgres]",
+      "display_name": "Actix 4.0 [Postgres + Deadpool]",
       "notes": "",
       "versus": ""
     }

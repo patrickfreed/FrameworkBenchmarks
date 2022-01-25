@@ -14,8 +14,8 @@ name = "actix-4-mongodb"
 path = "src/main_mongodb.rs"
 
 [[bin]]
-name = "actix-4-pg"
-path = "src/main_pg.rs"
+name = "actix-4-pg-deadpool"
+path = "src/main_pg_deadpool.rs"
 
 [dependencies]
 anyhow = "1"
