@@ -15,16 +15,10 @@ use deadpool_postgres::{Config, Pool, PoolConfig, Runtime};
 use futures::{stream::FuturesUnordered, StreamExt, TryStreamExt};
 use models::{Queries, Result, World};
 use rand::{prelude::SmallRng, Rng, SeedableRng};
-use simd_json_derive::Serialize;
 use tokio_postgres::{types::ToSql, NoTls};
 use yarte::ywrite_html;
 
-use crate::models::Fortune;
-
-#[derive(Serialize)]
-pub struct Message {
-    pub message: &'static str,
-}
+use crate::models::{Fortune, CONNECTION_POOL_SIZE};
 
 async fn find_random_world(pool: &Pool) -> Result<World> {
     let conn = pool.get().await?;
@@ -198,7 +192,7 @@ async fn main() -> Result<()> {
     cfg.dbname = Some("hello_world".to_string());
     cfg.user = Some("benchmarkdbuser".to_string());
     cfg.password = Some("benchmarkdbpass".to_string());
-    let pc = PoolConfig::new(56);
+    let pc = PoolConfig::new(CONNECTION_POOL_SIZE);
     cfg.pool = pc.into();
     let pool = cfg.create_pool(Some(Runtime::Tokio1), NoTls).unwrap();
 
