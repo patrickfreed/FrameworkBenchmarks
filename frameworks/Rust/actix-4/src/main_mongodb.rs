@@ -71,7 +71,10 @@ async fn find_random_worlds(data: web::Data<Data>, num_of_worlds: usize) -> Resu
 }
 
 #[actix_web::get("/queries")]
-async fn queries(data: web::Data<Data>, query: web::Query<Queries>) -> Result<HttpResponse<Vec<u8>>> {
+async fn queries(
+    data: web::Data<Data>,
+    query: web::Query<Queries>,
+) -> Result<HttpResponse<Vec<u8>>> {
     let n_queries = query.q;
 
     let worlds = find_random_worlds(data, n_queries).await?;
@@ -89,7 +92,10 @@ async fn queries(data: web::Data<Data>, query: web::Query<Queries>) -> Result<Ht
 }
 
 #[actix_web::get("/updates")]
-async fn updates(data: web::Data<Data>, query: web::Query<Queries>) -> Result<HttpResponse<Vec<u8>>> {
+async fn updates(
+    data: web::Data<Data>,
+    query: web::Query<Queries>,
+) -> Result<HttpResponse<Vec<u8>>> {
     let tokio_runtime = data.tokio_runtime.clone();
     let client = data.client.clone();
 
