@@ -2,6 +2,8 @@ use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 
+pub const CONNECTION_POOL_SIZE: usize = 40;
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
