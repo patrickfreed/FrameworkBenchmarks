@@ -2,17 +2,16 @@ mod models;
 
 use std::fmt::Write;
 
-use actix_http::{body::BoxBody, KeepAlive};
+use actix_http::KeepAlive;
 use actix_web::{
     http::{
         header::{HeaderValue, CONTENT_TYPE, SERVER},
         StatusCode,
     },
-    web::{self, Bytes},
-    App, HttpResponse, HttpServer,
+    web, App, HttpResponse, HttpServer,
 };
 use deadpool_postgres::{Config, Pool, PoolConfig, Runtime};
-use futures::{stream::FuturesUnordered, StreamExt, TryStreamExt};
+use futures::{stream::FuturesUnordered, TryStreamExt};
 use models::{Queries, Result, World};
 use rand::{prelude::SmallRng, Rng, SeedableRng};
 use tokio_postgres::{types::ToSql, NoTls};
@@ -53,12 +52,12 @@ async fn find_random_worlds(pool: &Pool, num_of_worlds: usize) -> Result<Vec<Wor
 }
 
 #[actix_web::get("/db")]
-async fn db(data: web::Data<Pool>) -> Result<HttpResponse> {
+async fn db(data: web::Data<Pool>) -> Result<HttpResponse<Vec<u8>>> {
     let world = find_random_world(&data).await?;
     let mut bytes = Vec::with_capacity(48);
     serde_json::to_writer(&mut bytes, &world)?;
 
-    let mut res = HttpResponse::with_body(StatusCode::OK, BoxBody::new(Bytes::from(bytes)));
+    let mut res = HttpResponse::with_body(StatusCode::OK, bytes);
     res.headers_mut()
         .insert(SERVER, HeaderValue::from_static("Actix"));
     res.headers_mut()
@@ -68,7 +67,10 @@ async fn db(data: web::Data<Pool>) -> Result<HttpResponse> {
 }
 
 #[actix_web::get("/queries")]
-async fn queries(data: web::Data<Pool>, query: web::Query<Queries>) -> Result<HttpResponse> {
+async fn queries(
+    data: web::Data<Pool>,
+    query: web::Query<Queries>,
+) -> Result<HttpResponse<Vec<u8>>> {
     let n_queries = query.q;
 
     let worlds = find_random_worlds(&data, n_queries).await?;
@@ -76,7 +78,7 @@ async fn queries(data: web::Data<Pool>, query: web::Query<Queries>) -> Result<Ht
     let mut bytes = Vec::with_capacity(35 * n_queries);
     serde_json::to_writer(&mut bytes, &worlds)?;
 
-    let mut res = HttpResponse::with_body(StatusCode::OK, BoxBody::new(Bytes::from(bytes)));
+    let mut res = HttpResponse::with_body(StatusCode::OK, bytes);
     res.headers_mut()
         .insert(SERVER, HeaderValue::from_static("Actix"));
     res.headers_mut()
@@ -86,7 +88,10 @@ async fn queries(data: web::Data<Pool>, query: web::Query<Queries>) -> Result<Ht
 }
 
 #[actix_web::get("/updates")]
-async fn updates(data: web::Data<Pool>, query: web::Query<Queries>) -> Result<HttpResponse> {
+async fn updates(
+    data: web::Data<Pool>,
+    query: web::Query<Queries>,
+) -> Result<HttpResponse<Vec<u8>>> {
     let mut worlds = find_random_worlds(&data, query.q).await?;
 
     let mut rng = SmallRng::from_entropy();
@@ -125,7 +130,7 @@ async fn updates(data: web::Data<Pool>, query: web::Query<Queries>) -> Result<Ht
     let mut bytes = Vec::with_capacity(35 * worlds.len());
     serde_json::to_writer(&mut bytes, &worlds)?;
 
-    let mut res = HttpResponse::with_body(StatusCode::OK, BoxBody::new(Bytes::from(bytes)));
+    let mut res = HttpResponse::with_body(StatusCode::OK, bytes);
     res.headers_mut()
         .insert(SERVER, HeaderValue::from_static("Actix"));
     res.headers_mut()
@@ -135,52 +140,41 @@ async fn updates(data: web::Data<Pool>, query: web::Query<Queries>) -> Result<Ht
 }
 
 #[actix_web::get("/fortunes")]
-async fn fortune(data: web::Data<Pool>) -> HttpResponse {
-    async fn fetch_fortunes(pool: &Pool) -> Result<Vec<Fortune>> {
-        let conn = pool.get().await?;
-        let stmt = conn.prepare("SELECT * FROM Fortune").await?;
-        let params: &[&'static str] = &[];
-        let s = conn.query_raw(&stmt, params).await?;
-        let mut stream = Box::pin(s);
-        let mut fortunes = Vec::new();
+async fn fortune(data: web::Data<Pool>) -> Result<HttpResponse<Vec<u8>>> {
+    let conn = data.get().await?;
+    let stmt = conn.prepare("SELECT * FROM Fortune").await?;
+    let params: &[&'static str] = &[];
+    let s = conn.query_raw(&stmt, params).await?;
 
-        while let Some(row) = stream.next().await {
-            let row = row
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{:?}", e)))?;
-            fortunes.push(Fortune {
-                id: row.get(0),
-                message: row.get(1),
-            });
-        }
+    let mut stream = Box::pin(s);
+    let mut fortunes = Vec::new();
 
+    while let Some(row) = stream.try_next().await? {
         fortunes.push(Fortune {
-            id: 0,
-            message: "Additional fortune added at request time.".to_string(),
+            id: row.get(0),
+            message: row.get(1),
         });
-
-        fortunes.sort_by(|a, b| a.message.cmp(&b.message));
-
-        Ok(fortunes)
     }
 
-    let res = fetch_fortunes(&data).await;
+    fortunes.push(Fortune {
+        id: 0,
+        message: "Additional fortune added at request time.".to_string(),
+    });
 
-    match res {
-        Ok(fortunes) => {
-            let mut body = Vec::with_capacity(2048);
-            ywrite_html!(body, "{{> fortune }}");
+    fortunes.sort_by(|a, b| a.message.cmp(&b.message));
 
-            let mut res = HttpResponse::with_body(StatusCode::OK, BoxBody::new(Bytes::from(body)));
-            res.headers_mut()
-                .insert(SERVER, HeaderValue::from_static("Actix"));
-            res.headers_mut().insert(
-                CONTENT_TYPE,
-                HeaderValue::from_static("text/html; charset=utf-8"),
-            );
-            res
-        }
-        Err(e) => HttpResponse::InternalServerError().body(e.to_string()),
-    }
+    let mut body = Vec::with_capacity(2048);
+    ywrite_html!(body, "{{> fortune }}");
+
+    let mut res = HttpResponse::with_body(StatusCode::OK, body);
+    res.headers_mut()
+        .insert(SERVER, HeaderValue::from_static("Actix"));
+    res.headers_mut().insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("text/html; charset=utf-8"),
+    );
+
+    Ok(res)
 }
 
 #[actix_web::main]

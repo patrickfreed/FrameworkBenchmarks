@@ -3,14 +3,10 @@ mod models;
 use models::{Fortune, Queries, Result, World, CONNECTION_POOL_SIZE};
 
 use actix_http::{
-    body::BoxBody,
     header::{HeaderValue, CONTENT_TYPE, SERVER},
     KeepAlive, StatusCode,
 };
-use actix_web::{
-    web::{self, Bytes},
-    App, HttpResponse, HttpServer,
-};
+use actix_web::{web, App, HttpResponse, HttpServer};
 use anyhow::bail;
 use futures::{stream::FuturesUnordered, TryStreamExt};
 use mongodb::bson::doc;

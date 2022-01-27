@@ -1,6 +1,6 @@
 use std::io;
 
-use actix_http::{body::BoxBody, KeepAlive};
+use actix_http::KeepAlive;
 use actix_web::{
     http::{
         header::{HeaderValue, CONTENT_TYPE, SERVER},
@@ -31,14 +31,14 @@ pub struct Message {
     pub message: &'static str,
 }
 
-async fn json() -> HttpResponse {
+async fn json() -> HttpResponse<Bytes> {
     let message = Message {
         message: "Hello, World!",
     };
     let mut body = BytesMut::with_capacity(SIZE);
     message.json_write(&mut Writer(&mut body)).unwrap();
 
-    let mut res = HttpResponse::with_body(StatusCode::OK, BoxBody::new(body.freeze()));
+    let mut res = HttpResponse::with_body(StatusCode::OK, body.freeze());
     res.headers_mut()
         .insert(SERVER, HeaderValue::from_static("A"));
     res.headers_mut()
@@ -46,11 +46,8 @@ async fn json() -> HttpResponse {
     res
 }
 
-async fn plaintext() -> HttpResponse {
-    let mut res = HttpResponse::with_body(
-        StatusCode::OK,
-        BoxBody::new(Bytes::from_static(b"Hello, World!")),
-    );
+async fn plaintext() -> HttpResponse<Bytes> {
+    let mut res = HttpResponse::with_body(StatusCode::OK, Bytes::from_static(b"Hello, World!"));
     res.headers_mut()
         .insert(SERVER, HeaderValue::from_static("A"));
     res.headers_mut()
