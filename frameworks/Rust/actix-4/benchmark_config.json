@@ -1,0 +1,63 @@
+{
+  "framework": "actix-4",
+  "tests": [{
+    "default": {
+      "json_url": "/json",
+      "plaintext_url": "/plaintext",
+      "port": 8080,
+      "approach": "Realistic",
+      "classification": "Micro",
+      "framework": "actix-4",
+      "language": "Rust",
+      "orm": "Raw",
+      "platform": "None",
+      "database": "None",
+      "database_os": "None",
+      "webserver": "actix-web",
+      "os": "Linux",
+      "display_name": "Actix 4.0",
+      "notes": "",
+      "versus": ""
+    },
+    "mongodb": {
+      "db_url": "/db",
+      "fortune_url": "/fortunes",
+      "query_url": "/queries?q=",
+      "update_url": "/updates?q=",
+      "port": 8080,
+      "approach": "Realistic",
+      "classification": "Micro",
+      "database": "MongoDB",
+      "framework": "actix-4",
+      "language": "Rust",
+      "orm": "Raw",
+      "platform": "None",
+      "webserver": "actix-web",
+      "os": "Linux",
+      "database_os": "Linux",
+      "display_name": "Actix 4.0 [MongoDB]",
+      "notes": "",
+      "versus": ""
+    },
+    "pg-deadpool": {
+      "db_url": "/db",
+      "fortune_url": "/fortunes",
+      "query_url": "/queries?q=",
+      "update_url": "/updates?q=",
+      "port": 8080,
+      "approach": "Realistic",
+      "classification": "Micro",
+      "database": "Postgres",
+      "framework": "actix-4",
+      "language": "Rust",
+      "orm": "Raw",
+      "platform": "None",
+      "webserver": "actix-web",
+      "os": "Linux",
+      "database_os": "Linux",
+      "display_name": "Actix 4.0 [Postgres + Deadpool]",
+      "notes": "",
+      "versus": ""
+    }
+  }]
+}
