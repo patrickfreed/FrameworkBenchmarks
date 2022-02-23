@@ -96,6 +96,26 @@
       "display_name": "Actix Web [MongoDB]",
       "notes": "",
       "versus": ""
+    },
+    "web-pg-deadpool": {
+      "db_url": "/db",
+      "fortune_url": "/fortunes",
+      "query_url": "/queries?q=",
+      "update_url": "/updates?q=",
+      "port": 8080,
+      "approach": "Realistic",
+      "classification": "Micro",
+      "database": "Postgres",
+      "framework": "actix",
+      "language": "Rust",
+      "orm": "Raw",
+      "platform": "None",
+      "webserver": "actix-web",
+      "os": "Linux",
+      "database_os": "Linux",
+      "display_name": "Actix Web [Postgres + Deadpool]",
+      "notes": "",
+      "versus": ""
     }
   }]
 }

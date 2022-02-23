@@ -23,6 +23,10 @@ path = "src/main_server.rs"
 name = "tfb-web-mongodb"
 path = "src/main_mongodb.rs"
 
+[[bin]]
+name = "tfb-web-pg-deadpool"
+path = "src/main_pg_deadpool.rs"
+
 [dependencies]
 anyhow = "1"
 actix = "0.12"
@@ -49,6 +53,7 @@ simd-json-derive = "0.2"
 snmalloc-rs = "0.2.6"
 tokio = { version = "1", features = ["full"] }
 tokio-postgres = "0.7.5"
+deadpool-postgres = "0.10.1"
 mongodb = { git = "https://github.com/mongodb/mongo-rust-driver", branch = "master" }
 url = "2.1"
 v_htmlescape = "0.14"

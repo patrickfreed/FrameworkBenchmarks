@@ -2,7 +2,7 @@ mod models_mongodb;
 mod utils;
 
 use models_mongodb::{Fortune, World};
-use utils::{Result, CONNECTION_POOL_SIZE, Queries};
+use utils::{Queries, Result, CONNECTION_POOL_SIZE};
 
 use actix_http::{
     header::{HeaderValue, CONTENT_TYPE, SERVER},
