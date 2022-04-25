@@ -16,32 +16,43 @@ use deadpool_postgres::{Config, Pool, PoolConfig, Runtime};
 use futures::{stream::FuturesUnordered, TryStreamExt};
 use models::{Fortune, World};
 use rand::{prelude::SmallRng, Rng, SeedableRng};
+use tokio::runtime::Handle;
 use tokio_postgres::{types::ToSql, NoTls};
 use utils::{Queries, Result, CONNECTION_POOL_SIZE};
 use yarte::ywrite_html;
 
-async fn find_random_world(pool: &Pool) -> Result<World> {
-    let conn = pool.get().await?;
-    let world = conn
-        .prepare("SELECT * FROM world WHERE id=$1")
-        .await
-        .unwrap();
-
-    let mut rng = SmallRng::from_entropy();
-    let id = (rng.gen::<u32>() % 10_000 + 1) as i32;
-
-    let row = conn.query_one(&world, &[&id]).await?;
-
-    Ok(World {
-        id: row.get(0),
-        randomnumber: row.get(1),
-    })
+struct Data {
+    pool: Pool,
+    tokio_runtime: tokio::runtime::Handle,
 }
 
-async fn find_random_worlds(pool: &Pool, num_of_worlds: usize) -> Result<Vec<World>> {
+async fn find_random_world(data: web::Data<Data>) -> Result<World> {
+    let runtime = data.tokio_runtime.clone();
+    runtime
+        .spawn(async move {
+            let conn = data.pool.get().await?;
+            let world = conn
+                .prepare("SELECT * FROM world WHERE id=$1")
+                .await
+                .unwrap();
+
+            let mut rng = SmallRng::from_entropy();
+            let id = (rng.gen::<u32>() % 10_000 + 1) as i32;
+
+            let row = conn.query_one(&world, &[&id]).await?;
+
+            Ok(World {
+                id: row.get(0),
+                randomnumber: row.get(1),
+            })
+        })
+        .await?
+}
+
+async fn find_random_worlds(data: web::Data<Data>, num_of_worlds: usize) -> Result<Vec<World>> {
     let mut futs = FuturesUnordered::new();
     for _ in 0..num_of_worlds {
-        futs.push(find_random_world(pool));
+        futs.push(find_random_world(data.clone()));
     }
 
     let mut worlds = Vec::with_capacity(num_of_worlds);
@@ -53,8 +64,8 @@ async fn find_random_worlds(pool: &Pool, num_of_worlds: usize) -> Result<Vec<Wor
 }
 
 #[actix_web::get("/db")]
-async fn db(data: web::Data<Pool>) -> Result<HttpResponse<Vec<u8>>> {
-    let world = find_random_world(&data).await?;
+async fn db(data: web::Data<Data>) -> Result<HttpResponse<Vec<u8>>> {
+    let world = find_random_world(data).await?;
     let mut bytes = Vec::with_capacity(48);
     serde_json::to_writer(&mut bytes, &world)?;
 
@@ -69,12 +80,12 @@ async fn db(data: web::Data<Pool>) -> Result<HttpResponse<Vec<u8>>> {
 
 #[actix_web::get("/queries")]
 async fn queries(
-    data: web::Data<Pool>,
+    data: web::Data<Data>,
     query: web::Query<Queries>,
 ) -> Result<HttpResponse<Vec<u8>>> {
     let n_queries = query.q;
 
-    let worlds = find_random_worlds(&data, n_queries).await?;
+    let worlds = find_random_worlds(data, n_queries).await?;
 
     let mut bytes = Vec::with_capacity(35 * n_queries);
     serde_json::to_writer(&mut bytes, &worlds)?;
@@ -90,46 +101,53 @@ async fn queries(
 
 #[actix_web::get("/updates")]
 async fn updates(
-    data: web::Data<Pool>,
+    data: web::Data<Data>,
     query: web::Query<Queries>,
 ) -> Result<HttpResponse<Vec<u8>>> {
-    let mut worlds = find_random_worlds(&data, query.q).await?;
+    let num_of_worlds = query.q;
+    let mut worlds = find_random_worlds(data.clone(), num_of_worlds).await?;
+    let runtime = data.tokio_runtime.clone();
+    let bytes = runtime
+        .spawn(async move {
+            let mut rng = SmallRng::from_entropy();
 
-    let mut rng = SmallRng::from_entropy();
+            let mut updates = "UPDATE world SET randomnumber = CASE id ".to_string();
+            let mut params: Vec<&(dyn ToSql + Sync)> = Vec::with_capacity(query.q as usize * 3);
 
-    let mut updates = "UPDATE world SET randomnumber = CASE id ".to_string();
-    let mut params: Vec<&(dyn ToSql + Sync)> = Vec::with_capacity(query.q as usize * 3);
+            let mut n_params = 1;
+            for world in worlds.iter_mut() {
+                let new_random_number = (rng.gen::<u32>() % 10_000 + 1) as i32;
+                write!(&mut updates, "when ${} then ${} ", n_params, n_params + 1).unwrap();
+                world.randomnumber = new_random_number;
+                n_params += 2;
+            }
 
-    let mut n_params = 1;
-    for world in worlds.iter_mut() {
-        let new_random_number = (rng.gen::<u32>() % 10_000 + 1) as i32;
-        write!(&mut updates, "when ${} then ${} ", n_params, n_params + 1).unwrap();
-        world.randomnumber = new_random_number;
-        n_params += 2;
-    }
+            // need separate loop to borrow immutably
+            for world in worlds.iter() {
+                params.push(&world.id);
+                params.push(&world.randomnumber);
+            }
 
-    // need separate loop to borrow immutably
-    for world in worlds.iter() {
-        params.push(&world.id);
-        params.push(&world.randomnumber);
-    }
+            updates.push_str("ELSE randomnumber END WHERE id IN (");
+            for world in worlds.iter() {
+                write!(&mut updates, "${},", n_params).unwrap();
+                params.push(&world.id);
+                n_params += 1;
+            }
 
-    updates.push_str("ELSE randomnumber END WHERE id IN (");
-    for world in worlds.iter() {
-        write!(&mut updates, "${},", n_params).unwrap();
-        params.push(&world.id);
-        n_params += 1;
-    }
+            updates.pop(); // drop trailing comma
+            updates.push(')');
 
-    updates.pop(); // drop trailing comma
-    updates.push(')');
+            let conn = data.pool.get().await?;
+            let stmt = conn.prepare(&updates).await?;
+            conn.query(&stmt, &params[..]).await?;
 
-    let conn = data.get().await?;
-    let stmt = conn.prepare(&updates).await?;
-    conn.query(&stmt, &params).await?;
+            let mut bytes = Vec::with_capacity(35 * num_of_worlds);
+            serde_json::to_writer(&mut bytes, &worlds)?;
 
-    let mut bytes = Vec::with_capacity(35 * worlds.len());
-    serde_json::to_writer(&mut bytes, &worlds)?;
+            Result::Ok(bytes)
+        })
+        .await??;
 
     let mut res = HttpResponse::with_body(StatusCode::OK, bytes);
     res.headers_mut()
@@ -141,28 +159,36 @@ async fn updates(
 }
 
 #[actix_web::get("/fortunes")]
-async fn fortune(data: web::Data<Pool>) -> Result<HttpResponse<Vec<u8>>> {
-    let conn = data.get().await?;
-    let stmt = conn.prepare("SELECT * FROM Fortune").await?;
-    let params: &[&'static str] = &[];
-    let s = conn.query_raw(&stmt, params).await?;
+async fn fortune(data: web::Data<Data>) -> Result<HttpResponse<Vec<u8>>> {
+    let runtime = data.tokio_runtime.clone();
 
-    let mut stream = Box::pin(s);
-    let mut fortunes = Vec::new();
+    let fortunes = runtime
+        .spawn(async move {
+            let conn = data.pool.get().await?;
+            let stmt = conn.prepare("SELECT * FROM Fortune").await?;
+            let params: &[&'static str] = &[];
+            let s = conn.query_raw(&stmt, params).await?;
 
-    while let Some(row) = stream.try_next().await? {
-        fortunes.push(Fortune {
-            id: row.get(0),
-            message: row.get(1),
-        });
-    }
+            let mut stream = Box::pin(s);
+            let mut fortunes: Vec<Fortune> = Vec::new();
 
-    fortunes.push(Fortune {
-        id: 0,
-        message: "Additional fortune added at request time.".to_string(),
-    });
+            while let Some(row) = stream.try_next().await? {
+                fortunes.push(Fortune {
+                    id: row.get(0),
+                    message: row.get(1),
+                });
+            }
 
-    fortunes.sort_by(|a, b| a.message.cmp(&b.message));
+            fortunes.push(Fortune {
+                id: 0,
+                message: "Additional fortune added at request time.".to_string(),
+            });
+
+            fortunes.sort_by(|a, b| a.message.cmp(&b.message));
+
+            Result::<_>::Ok(fortunes)
+        })
+        .await??;
 
     let mut body = Vec::with_capacity(2048);
     ywrite_html!(body, "{{> fortune }}");
@@ -182,6 +208,9 @@ async fn fortune(data: web::Data<Pool>) -> Result<HttpResponse<Vec<u8>>> {
 async fn main() -> Result<()> {
     println!("Starting http server: 0.0.0.0:8080");
 
+    // use a separate, multithreaded tokio runtime for db queries for better performance
+    let handle = Handle::current();
+
     let mut cfg = Config::new();
     cfg.host = Some("tfb-database".to_string());
     cfg.dbname = Some("hello_world".to_string());
@@ -193,7 +222,10 @@ async fn main() -> Result<()> {
 
     HttpServer::new(move || {
         App::new()
-            .app_data(web::Data::new(pool.clone()))
+            .app_data(web::Data::new(Data {
+                pool: pool.clone(),
+                tokio_runtime: handle.clone(),
+            }))
             .service(fortune)
             .service(db)
             .service(queries)
