@@ -54,7 +54,7 @@ snmalloc-rs = "0.2.6"
 tokio = { version = "1", features = ["full"] }
 tokio-postgres = "0.7.5"
 deadpool-postgres = "0.10.1"
-mongodb = { git = "https://github.com/mongodb/mongo-rust-driver", branch = "master" }
+mongodb = "2.2.0"
 url = "2.1"
 v_htmlescape = "0.14"
 yarte = { version = "0.15", features = ["bytes-buf"] }
