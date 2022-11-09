@@ -119,24 +119,29 @@ async fn fortunes(DatabaseConnection(db): DatabaseConnection) -> impl IntoRespon
     )
 }
 
-fn main() {
-    dotenv().ok();
+// fn main() {
+//     dotenv().ok();
 
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+//     let rt = tokio::runtime::Builder::new_current_thread()
+//         .enable_all()
+//         .build()
+//         .unwrap();
 
-    for _ in 1..num_cpus::get() {
-        std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .unwrap();
-            rt.block_on(serve());
-        });
-    }
-    rt.block_on(serve());
+//     for _ in 1..num_cpus::get() {
+//         std::thread::spawn(move || {
+//             let rt = tokio::runtime::Builder::new_current_thread()
+//                 .enable_all()
+//                 .build()
+//                 .unwrap();
+//             rt.block_on(serve());
+//         });
+//     }
+//     rt.block_on(serve());
+// }
+
+#[tokio::main]
+async fn main() {
+    serve().await;
 }
 
 async fn serve() {

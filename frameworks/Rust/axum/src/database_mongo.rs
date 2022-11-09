@@ -64,7 +64,11 @@ pub async fn find_worlds(db: Database, ids: Vec<i32>) -> Result<Vec<World>, Mong
     let future_worlds = FuturesUnordered::new();
 
     for id in ids {
-        future_worlds.push(find_world_by_id(db.clone(), id));
+        let d = db.clone();
+        future_worlds.push(async move {
+            let world = tokio::task::spawn(find_world_by_id(d, id)).await.unwrap();
+            world
+        });
     }
 
     let worlds: Result<Vec<World>, MongoError> = future_worlds.try_collect().await;
