@@ -157,15 +157,15 @@ async fn serve() {
     client_options.connect_timeout = Some(Duration::from_millis(200));
 
     // the server will select the algorithm it supports from the list provided by the driver
-    client_options.compressors = Some(vec![
-        Compressor::Snappy,
-        Compressor::Zlib {
-            level: Default::default(),
-        },
-        Compressor::Zstd {
-            level: Default::default(),
-        },
-    ]);
+    // client_options.compressors = Some(vec![
+    //     Compressor::Snappy,
+    //     Compressor::Zlib {
+    //         level: Default::default(),
+    //     },
+    //     Compressor::Zstd {
+    //         level: Default::default(),
+    //     },
+    // ]);
 
     let client = Client::with_options(client_options).unwrap();
     let database = client.database("hello_world");
