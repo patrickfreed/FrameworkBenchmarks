@@ -14,6 +14,7 @@ use axum::{
     extract::Query, http::StatusCode, response::IntoResponse, routing::get, Extension,
     Json, Router,
 };
+use database_pg_pool::DatabasePool;
 use dotenv::dotenv;
 use futures_util::stream::FuturesUnordered;
 use futures_util::TryStreamExt;
@@ -46,21 +47,24 @@ async fn db(DatabaseClient(client): DatabaseClient) -> impl IntoResponse {
 }
 
 async fn queries(
-    DatabaseClient(client): DatabaseClient,
+    DatabasePool(pool): DatabasePool,
     Query(params): Query<Params>,
 ) -> impl IntoResponse {
     let q = parse_params(params);
 
     let mut rng = SmallRng::from_rng(&mut thread_rng()).unwrap();
 
-    let select = prepare_fetch_world_by_id_statement(&client).await;
-
     let future_worlds = FuturesUnordered::new();
 
     for _ in 0..q {
         let w_id = (rng.gen::<u32>() % 10_000 + 1) as i32;
+        let p = pool.clone();
 
-        future_worlds.push(fetch_world_by_id(&client, w_id, &select));
+        future_worlds.push(async move {
+            let client = p.get().await.unwrap();
+            let select = prepare_fetch_world_by_id_statement(&client).await;
+            fetch_world_by_id(&client, w_id, &select).await
+        });
     }
 
     let worlds: Result<Vec<World>, PgError> = future_worlds.try_collect().await;

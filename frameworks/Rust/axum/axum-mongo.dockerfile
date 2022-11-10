@@ -1,7 +1,7 @@
 FROM rust:1.60-slim-buster
 
 ENV AXUM_TECHEMPOWER_MONGODB_URL=mongodb://tfb-database:27017
-ENV AXUM_TECHEMPOWER_MAX_POOL_SIZE=256
+ENV AXUM_TECHEMPOWER_MAX_POOL_SIZE=56
 ENV AXUM_TECHEMPOWER_MIN_POOL_SIZE=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \

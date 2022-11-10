@@ -48,6 +48,23 @@ pub async fn create_pool(
 }
 
 pub struct DatabaseClient(pub Client);
+pub struct DatabasePool(pub deadpool_postgres::Pool);
+
+#[async_trait]
+impl<B> FromRequest<B> for DatabasePool
+where
+    B: Send,
+{
+    type Rejection = (StatusCode, String);
+
+    async fn from_request(req: &mut RequestParts<B>) -> Result<Self, Self::Rejection> {
+        let Extension(pool) = Extension::<deadpool_postgres::Pool>::from_request(req)
+            .await
+            .map_err(internal_error)?;
+
+        Ok(Self(pool))
+    }
+}
 
 #[async_trait]
 impl<B> FromRequest<B> for DatabaseClient
